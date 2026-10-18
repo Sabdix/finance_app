@@ -1,0 +1,52 @@
+{
+  "name": "finanzas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Finanzas personales locales: cuentas, movimientos, presupuestos y meses sin intereses",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "dist": "electron-vite build && electron-builder",
+    "test:db": "FINANZAS_DB_TESTS=1 ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run src/main"
+  },
+  "build": {
+    "appId": "local.finanzas",
+    "productName": "Finanzas",
+    "files": [
+      "out/**/*"
+    ],
+    "mac": {
+      "target": "dmg"
+    }
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^6.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.3": true,
+    "electron-winstaller": false
+  }
+}
