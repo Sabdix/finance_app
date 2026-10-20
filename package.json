@@ -12,6 +12,7 @@
     "test": "vitest run",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "dist": "electron-vite build && electron-builder",
+    "dist:win": "electron-vite build && electron-builder --win --x64",
     "test:db": "FINANZAS_DB_TESTS=1 ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run src/main"
   },
   "build": {
@@ -22,6 +23,13 @@
     ],
     "mac": {
       "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     }
   },
   "dependencies": {

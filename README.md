@@ -12,6 +12,7 @@ movimientos, categorías y compras a meses sin intereses. Los datos se quedan en
 | `npm run test:db` | Pruebas contra SQLite real, usando el Node de Electron |
 | `npm run typecheck` | Revisión de tipos |
 | `npm run dist` | Genera el instalador `.dmg` en `dist/` |
+| `npm run dist:win` | Genera el instalador `.exe` (NSIS, x64) en `dist/`; conviene correrlo en Windows |
 
 Después de `npm install`, `better-sqlite3` se recompila para Electron (`postinstall`). Si npm bloquea
 el script de instalación, apruébalo con `npm install-scripts approve better-sqlite3`.
