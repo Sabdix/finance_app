@@ -3,7 +3,7 @@ import { firstDueDateFor, formatDate, today } from '@shared/dates'
 import { buildSchedule, planProgress } from '@shared/installments'
 import { formatMoney, parseMoney } from '@shared/money'
 import type { AccountWithBalance, Category, InstallmentPlan } from '@shared/types'
-import { AccountDot, accountOptions, ColorSelect } from '../components/ColorSelect'
+import { AccountDot, accountOptions, categoryOptions, SearchSelect } from '../components/SearchSelect'
 import { Badge, Button, Card, Empty, Field, FormActions, inputClass, Modal, MoneyInput, PageHeader, ProgressBar, Stat } from '../components/ui'
 import { useApi, useMutate, useShowError } from '../lib/data'
 
@@ -229,17 +229,10 @@ function PlanForm({ cards, categories, onDone }: { cards: AccountWithBalance[]; 
     <form onSubmit={submit}>
       <div className="grid grid-cols-2 gap-x-4">
         <Field label="Tarjeta">
-          <ColorSelect value={accountId} onChange={setAccountId} options={accountOptions(cards)} />
+          <SearchSelect value={accountId} onChange={setAccountId} options={accountOptions(cards)} />
         </Field>
         <Field label="Categoría">
-          <select className={inputClass} value={categoryId ?? ''} onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : null)}>
-            <option value="">Sin categoría</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.groupName} · {c.name}
-              </option>
-            ))}
-          </select>
+          <SearchSelect value={categoryId} onChange={setCategoryId} options={categoryOptions(categories)} />
         </Field>
       </div>
       <Field label="¿Qué compraste?">

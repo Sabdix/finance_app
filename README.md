@@ -34,6 +34,10 @@ el script de instalación, apruébalo con `npm install-scripts approve better-sq
 - En las **tarjetas de crédito**, el saldo es negativo cuando debes. Un gasto con tarjeta aumenta la deuda.
 - Un **pago de tarjeta** es una transferencia de débito a crédito: crea dos movimientos ligados, y al
   borrar uno se borran ambos.
+- Un **gasto dividido** se reparte entre cuentas, categorías o ambas (por ejemplo, $100 de débito y $100
+  de tarjeta, o $150 de Supermercado y $50 de Restaurantes): crea un movimiento por parte, ligados por
+  `split_id`, con la misma fecha y descripción. Saldos, presupuesto y reportes los tratan como gastos
+  normales. Se edita y se borra como grupo.
 - Una **compra a meses sin intereses** carga el total a la tarjeta el día de la compra (así lo aparta el
   banco) y genera el calendario de cuotas. Si la tarjeta tiene día de corte y de pago, la fecha del
   primer pago se calcula sola. Cada cuota se marca como pagada a mano, o en bloque con "Marcar pagadas"

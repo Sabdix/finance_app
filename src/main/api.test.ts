@@ -101,6 +101,110 @@ describe('api con SQLite real', () => {
     expect(() => api.setTransactionNotes(id, 'x'.repeat(2001))).toThrow(/2000/)
   })
 
+  it('divide un gasto entre varias cuentas y lo edita y borra como grupo', () => {
+    const cash = api.createAccount({ name: 'Efectivo', type: 'cash', openingBalance: 50000, creditLimit: null, statementDay: null, dueDay: null })
+    const before = { debit: balance(debit), card: balance(card), cash: balance(cash) }
+    const input = { kind: 'expense' as const, date: '2026-10-25', accountId: debit, amount: 20000, categoryId: food, description: 'Súper dividido', notes: 'mitad y mitad' }
+
+    const id = api.createTransaction({ ...input, splits: [{ accountId: debit, categoryId: food, amount: 10000 }, { accountId: card, categoryId: food, amount: 10000 }] })
+    expect(balance(debit)).toBe(before.debit - 10000)
+    expect(balance(card)).toBe(before.card - 10000)
+    const parts = api.listTransactions({}).filter((t) => t.splitId && t.description === 'Súper dividido')
+    expect(parts).toHaveLength(2)
+    expect(parts.every((t) => t.categoryId === food && t.notes === 'mitad y mitad')).toBe(true)
+    // Aunque se filtre por una cuenta, se ven todas las partes del gasto.
+    const fromCard = api.listTransactions({ accountId: card }).find((t) => t.splitId === parts[0].splitId)!
+    expect(fromCard.splitParts).toEqual([{ accountId: debit, categoryId: food, amount: 10000 }, { accountId: card, categoryId: food, amount: 10000 }])
+
+    // La parte con tarjeta pasa a la cajita de pago de esa tarjeta, como cualquier gasto con tarjeta.
+    const rows = api.getBudgetMonth('2026-10').rows
+    const payment = rows.find((r) => r.kind === 'card_payment' && r.name === 'Pago Visa')!
+    expect(payment.activity).toBeGreaterThanOrEqual(10000)
+
+    // Editar como grupo: agregar una tercera cuenta y cambiar montos.
+    api.updateTransaction(fromCard.id, {
+      ...input, amount: 30000, notes: undefined,
+      splits: [{ accountId: debit, categoryId: food, amount: 5000 }, { accountId: card, categoryId: food, amount: 15000 }, { accountId: cash, categoryId: food, amount: 10000 }]
+    })
+    expect(balance(debit)).toBe(before.debit - 5000)
+    expect(balance(card)).toBe(before.card - 15000)
+    expect(balance(cash)).toBe(before.cash - 10000)
+    const edited = api.listTransactions({}).filter((t) => t.description === 'Súper dividido')
+    expect(edited).toHaveLength(3)
+    expect(edited.every((t) => t.notes === 'mitad y mitad')).toBe(true)
+
+    api.setTransactionNotes(edited[0].id, 'ticket 99')
+    expect(api.listTransactions({}).filter((t) => t.splitId === edited[0].splitId).map((t) => t.notes)).toEqual(['ticket 99', 'ticket 99', 'ticket 99'])
+
+    // Quitar la división: queda un gasto normal en una sola cuenta.
+    api.updateTransaction(edited[0].id, { ...input, accountId: cash })
+    const single = api.listTransactions({}).filter((t) => t.description === 'Súper dividido')
+    expect(single).toHaveLength(1)
+    expect(single[0]).toMatchObject({ splitId: null, splitParts: null, accountId: cash, amount: -20000 })
+    expect([balance(debit), balance(card), balance(cash)]).toEqual([before.debit, before.card, before.cash - 20000])
+
+    // Volver a dividir y borrar desde cualquier parte elimina todas.
+    api.updateTransaction(single[0].id, { ...input, splits: [{ accountId: debit, categoryId: food, amount: 1 }, { accountId: cash, categoryId: food, amount: 19999 }] })
+    const again = api.listTransactions({}).filter((t) => t.description === 'Súper dividido')
+    expect(again).toHaveLength(2)
+    api.deleteTransaction(again[1].id)
+    expect(api.listTransactions({}).filter((t) => t.description === 'Súper dividido')).toHaveLength(0)
+    expect([balance(debit), balance(card), balance(cash)]).toEqual([before.debit, before.card, before.cash])
+  })
+
+  it('divide un gasto entre categorías, con la misma cuenta o con varias', () => {
+    const restaurants = api.listCategories().find((c) => c.name === 'Restaurantes')!.id
+    const activity = (categoryId: number): number =>
+      api.getBudgetMonth('2026-11').rows.find((r) => r.categoryId === categoryId)!.activity
+    const before = { debit: balance(debit), card: balance(card), food: activity(food), restaurants: activity(restaurants) }
+    const input = { kind: 'expense' as const, date: '2026-11-03', accountId: debit, amount: 20000, categoryId: null, description: 'Súper y comida' }
+
+    api.createTransaction({
+      ...input,
+      splits: [
+        { accountId: debit, categoryId: food, amount: 15000 },
+        { accountId: debit, categoryId: restaurants, amount: 5000 }
+      ]
+    })
+    expect(balance(debit)).toBe(before.debit - 20000)
+    expect(activity(food)).toBe(before.food - 15000)
+    expect(activity(restaurants)).toBe(before.restaurants - 5000)
+    const parts = api.listTransactions({}).filter((t) => t.description === 'Súper y comida')
+    expect(parts.map((t) => [t.categoryId, t.amount]).sort()).toEqual([[food, -15000], [restaurants, -5000]].sort())
+
+    // Mezclar: la misma categoría en dos cuentas y otra categoría en una de ellas.
+    api.updateTransaction(parts[0].id, {
+      ...input,
+      amount: 30000,
+      splits: [
+        { accountId: debit, categoryId: food, amount: 10000 },
+        { accountId: card, categoryId: food, amount: 10000 },
+        { accountId: card, categoryId: restaurants, amount: 10000 }
+      ]
+    })
+    expect(balance(debit)).toBe(before.debit - 10000)
+    expect(balance(card)).toBe(before.card - 20000)
+    expect(activity(food)).toBe(before.food - 20000)
+    expect(activity(restaurants)).toBe(before.restaurants - 10000)
+
+    const edited = api.listTransactions({}).filter((t) => t.description === 'Súper y comida')
+    expect(edited).toHaveLength(3)
+    api.deleteTransaction(edited[0].id)
+    expect([balance(debit), balance(card), activity(food), activity(restaurants)]).toEqual([before.debit, before.card, before.food, before.restaurants])
+  })
+
+  it('valida las partes de un gasto dividido', () => {
+    const base = { kind: 'expense' as const, date: '2026-10-25', accountId: debit, amount: 20000, categoryId: null, description: '' }
+    expect(() => api.createTransaction({ ...base, splits: [{ accountId: debit, categoryId: food, amount: 20000 }] })).toThrow(/dos partes/)
+    expect(() => api.createTransaction({ ...base, splits: [{ accountId: debit, categoryId: food, amount: 10000 }, { accountId: card, categoryId: food, amount: 5000 }] })).toThrow(/sumar/)
+    expect(() => api.createTransaction({ ...base, splits: [{ accountId: debit, categoryId: food, amount: 10000 }, { accountId: debit, categoryId: food, amount: 10000 }] })).toThrow(/repitas/)
+    expect(() => api.createTransaction({ ...base, splits: [{ accountId: debit, categoryId: food, amount: 20000 }, { accountId: card, categoryId: food, amount: 0 }] })).toThrow(/mayor a cero/)
+    expect(() => api.createTransaction({ ...base, splits: [{ accountId: debit, categoryId: food, amount: 10000 }, { accountId: 99999, categoryId: food, amount: 10000 }] })).toThrow(/no existe/)
+    const salary = api.listCategories().find((c) => c.name === 'Sueldo')!.id
+    expect(() => api.createTransaction({ ...base, splits: [{ accountId: debit, categoryId: food, amount: 10000 }, { accountId: debit, categoryId: salary, amount: 10000 }] })).toThrow(/categoría de gasto/)
+    expect(() => api.createTransaction({ ...base, kind: 'income', splits: [{ accountId: debit, categoryId: food, amount: 10000 }, { accountId: card, categoryId: food, amount: 10000 }] })).toThrow(/gastos/)
+  })
+
   it('rechaza compras a meses en cuentas de débito', () => {
     expect(() =>
       api.createInstallmentPlan({ accountId: debit, categoryId: null, description: 'X', purchaseDate: '2026-01-01', totalAmount: 100, months: 3, firstDueDate: '2026-02-01' })

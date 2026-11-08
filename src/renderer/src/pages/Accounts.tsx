@@ -3,6 +3,7 @@ import { ACCOUNT_COLORS, nextAccountColor } from '@shared/colors'
 import { centsToInput, formatMoney, parseMoney } from '@shared/money'
 import type { AccountType, AccountWithBalance } from '@shared/types'
 import type { Navigate } from '../App'
+import { SearchSelect } from '../components/SearchSelect'
 import { Badge, Button, Card, Empty, Field, FormActions, inputClass, Modal, Money, MoneyInput, NotesField, NotesText, PageHeader } from '../components/ui'
 import { useApi, useMutate, useShowError } from '../lib/data'
 
@@ -242,11 +243,15 @@ function AccountForm({
       </Field>
       <ColorPicker value={color} onChange={setColor} />
       <Field label="Tipo">
-        <select className={inputClass} value={type} onChange={(e) => setType(e.target.value as AccountType)}>
-          <option value="debit">Débito</option>
-          <option value="cash">Efectivo</option>
-          <option value="credit">Tarjeta de crédito</option>
-        </select>
+        <SearchSelect<AccountType>
+          value={type}
+          onChange={setType}
+          options={[
+            { value: 'debit', label: 'Débito' },
+            { value: 'cash', label: 'Efectivo' },
+            { value: 'credit', label: 'Tarjeta de crédito' }
+          ]}
+        />
       </Field>
       <Field
         label={isCredit ? 'Deuda actual' : 'Saldo actual'}

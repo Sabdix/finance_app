@@ -9,7 +9,7 @@ vi.mock('electron', () => ({ app: { getPath: () => dir }, BrowserWindow: {}, dia
 
 const { api } = await import('./api')
 const { closeDb } = await import('./db/connection')
-const { migrate } = await import('./db/migrations')
+const { migrate, MIGRATION_COUNT } = await import('./db/migrations')
 
 afterAll(() => {
   closeDb()
@@ -116,7 +116,7 @@ describe('migración desde la versión 1', () => {
     db.prepare(`INSERT INTO accounts (id, name, type) VALUES (1, 'Amex', 'credit'), (2, 'Débito', 'debit')`).run()
     db.prepare(`INSERT INTO transactions (date, account_id, amount, category_id) VALUES ('2026-10-01', 1, -500, 6)`).run()
     migrate(db)
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
+    expect(db.pragma('user_version', { simple: true })).toBe(MIGRATION_COUNT)
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
     expect(db.prepare(`SELECT name FROM categories WHERE kind = 'card_payment'`).all()).toEqual([{ name: 'Pago Amex' }])
     expect(db.prepare('SELECT c.name FROM transactions t JOIN categories c ON c.id = t.category_id').get()).toEqual({ name: 'Supermercado' })

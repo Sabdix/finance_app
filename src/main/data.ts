@@ -166,7 +166,7 @@ export function buildCsv(kind: CsvExportKind, fromDate?: string, toDate?: string
   check(toDate === undefined || isIsoDate(toDate), 'Fecha final inválida')
   const rows = db
     .prepare(
-      `SELECT t.date, t.amount, t.description, t.notes, t.transfer_id, t.installment_plan_id,
+      `SELECT t.date, t.amount, t.description, t.notes, t.transfer_id, t.installment_plan_id, t.split_id,
          a.name AS account, a.type AS account_type, c.name AS category, c.group_name,
          (SELECT a2.name FROM transactions t2 JOIN accounts a2 ON a2.id = t2.account_id
            WHERE t2.transfer_id = t.transfer_id AND t2.id <> t.id) AS counterpart
@@ -185,7 +185,9 @@ export function buildCsv(kind: CsvExportKind, fromDate?: string, toDate?: string
           ? 'Pago de tarjeta'
           : 'Transferencia'
         : (r.amount as number) < 0
-          ? 'Gasto'
+          ? r.split_id
+            ? 'Gasto dividido'
+            : 'Gasto'
           : 'Ingreso'
   return toCsv(
     ['Fecha', 'Cuenta', 'Tipo', 'Categoría', 'Grupo', 'Descripción', 'Monto', 'Cuenta relacionada', 'Observaciones'],

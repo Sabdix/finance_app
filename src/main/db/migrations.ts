@@ -139,6 +139,14 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE accounts ADD COLUMN notes TEXT NOT NULL DEFAULT '';
   ALTER TABLE transactions ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+  `,
+  // Gastos divididos entre varias cuentas: cada parte es un movimiento ligado al mismo split.
+  `
+  CREATE TABLE splits (
+    id INTEGER PRIMARY KEY
+  );
+  ALTER TABLE transactions ADD COLUMN split_id INTEGER REFERENCES splits(id) ON DELETE CASCADE;
+  CREATE INDEX idx_transactions_split ON transactions(split_id) WHERE split_id IS NOT NULL;
   `
 ]
 

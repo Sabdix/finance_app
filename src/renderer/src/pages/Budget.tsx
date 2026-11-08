@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { currentMonth, formatMonth, shiftMonth } from '@shared/dates'
 import { centsToInput, formatMoney, parseMoney } from '@shared/money'
 import type { BudgetRow } from '@shared/types'
-import { AccountDot, ColorSelect, type ColorOption } from '../components/ColorSelect'
+import { AccountDot, SearchSelect, type SelectOption } from '../components/SearchSelect'
 import { Button, Card, Empty, Field, FormActions, inputClass, Modal, Money, MoneyInput, PageHeader } from '../components/ui'
 import { useApi, useMutate, useShowError } from '../lib/data'
 
@@ -222,11 +222,12 @@ function MoveForm({
   const [to, setTo] = useState<number | null>(draft.to)
   const [amount, setAmount] = useState(draft.amount > 0 ? centsToInput(draft.amount) : '')
 
-  const options: ColorOption<number | null>[] = [
+  const options: SelectOption<number | null>[] = [
     { value: null, label: 'Por asignar', detail: formatMoney(readyToAssign) },
     ...rows.map((r) => ({
       value: r.categoryId,
       label: r.name,
+      group: r.groupName,
       color: r.accountColor ?? undefined,
       detail: formatMoney(r.available)
     }))
@@ -243,10 +244,10 @@ function MoveForm({
   return (
     <form onSubmit={submit}>
       <Field label="Desde">
-        <ColorSelect value={from} onChange={setFrom} options={options} />
+        <SearchSelect value={from} onChange={setFrom} options={options} />
       </Field>
       <Field label="Hacia">
-        <ColorSelect value={to} onChange={setTo} options={options} />
+        <SearchSelect value={to} onChange={setTo} options={options} />
       </Field>
       <Field label="Monto">
         <MoneyInput value={amount} onChange={setAmount} autoFocus />

@@ -1,39 +1,47 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { formatMoney } from '@shared/money'
-import type { AccountWithBalance } from '@shared/types'
+import { filterOptions, type Searchable } from '@shared/search'
+import type { AccountType, AccountWithBalance, Category } from '@shared/types'
 
 export function AccountDot({ color, className = 'size-2.5' }: { color: string; className?: string }) {
   return <span className={`inline-block shrink-0 rounded-full ${className}`} style={{ backgroundColor: color }} aria-hidden />
 }
 
-export interface ColorOption<V> {
+export interface SelectOption<V> extends Searchable {
   value: V
-  label: string
   color?: string
-  detail?: string
+  /** Encabezado bajo el que se agrupa la opción (las opciones de un mismo grupo deben ir seguidas). */
+  group?: string
+  /** Texto extra que también se busca, aunque no se muestre. */
+  keywords?: string
 }
 
 /**
- * Lista desplegable que sí puede mostrar colores (las opciones de un <select> nativo no se pueden pintar en macOS).
- * Se maneja con teclado: flechas para moverse, Enter o espacio para elegir y Escape para cerrar.
+ * Lista desplegable con buscador, que además puede mostrar colores (las opciones de un <select> nativo no se pueden
+ * pintar en macOS). Al abrirla, o al empezar a escribir sobre ella, aparece un campo que filtra las opciones.
+ * Teclado: flechas para moverse, Enter para elegir, Escape para cerrar.
  */
-export function ColorSelect<V>({
+export function SearchSelect<V>({
   options,
   value,
   onChange,
-  className = ''
+  className = '',
+  'aria-label': ariaLabel
 }: {
-  options: ColorOption<V>[]
+  options: SelectOption<V>[]
   value: V
   onChange: (value: V) => void
   className?: string
+  'aria-label'?: string
 }) {
   const id = useId()
   const ref = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
-  const selectedIndex = Math.max(0, options.findIndex((o) => o.value === value))
-  const [active, setActive] = useState(selectedIndex)
-  const selected = options[selectedIndex]
+  const [query, setQuery] = useState('')
+  const [active, setActive] = useState(0)
+  const selected = options.find((o) => o.value === value) ?? options[0]
+  const visible = useMemo(() => filterOptions(options, query), [options, query])
 
   useEffect(() => {
     if (!open) return
@@ -48,54 +56,73 @@ export function ColorSelect<V>({
     if (open) document.getElementById(`${id}-${active}`)?.scrollIntoView({ block: 'nearest' })
   }, [open, active, id])
 
-  function show(): void {
-    setActive(selectedIndex)
+  function show(initialQuery = ''): void {
+    setQuery(initialQuery)
+    const list = filterOptions(options, initialQuery)
+    setActive(initialQuery ? 0 : Math.max(0, list.findIndex((o) => o.value === value)))
     setOpen(true)
   }
 
-  function choose(index: number): void {
-    onChange(options[index].value)
+  function close(): void {
     setOpen(false)
+    buttonRef.current?.focus()
   }
 
-  function onKeyDown(e: KeyboardEvent<HTMLButtonElement>): void {
+  function choose(option: SelectOption<V> | undefined): void {
+    if (!option) return
+    onChange(option.value)
+    close()
+  }
+
+  function onButtonKeyDown(e: KeyboardEvent<HTMLButtonElement>): void {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      show()
+    } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // Empezar a escribir sobre la lista cerrada la abre ya filtrando.
+      e.preventDefault()
+      show(e.key)
+    }
+  }
+
+  function onSearchKeyDown(e: KeyboardEvent<HTMLInputElement>): void {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
-      if (!open) return show()
       const delta = e.key === 'ArrowDown' ? 1 : -1
-      setActive((i) => Math.min(options.length - 1, Math.max(0, i + delta)))
-    } else if (e.key === 'Enter' || e.key === ' ') {
+      setActive((i) => Math.min(visible.length - 1, Math.max(0, i + delta)))
+    } else if (e.key === 'Enter') {
+      // No enviar el formulario: Enter elige la opción resaltada.
       e.preventDefault()
-      if (open) choose(active)
-      else show()
-    } else if (e.key === 'Escape' && open) {
+      choose(visible[active])
+    } else if (e.key === 'Escape') {
       // No dejar que el Escape cierre también el modal.
       e.preventDefault()
       e.stopPropagation()
-      setOpen(false)
+      close()
     } else if (e.key === 'Tab') {
       setOpen(false)
     }
   }
 
   // Dentro de un <label>, un clic en la lista volvería a "activar" el botón; preventDefault lo evita.
-  const stop = (e: MouseEvent): void => e.preventDefault()
+  const stop = (e: MouseEvent): void => {
+    if (!(e.target instanceof HTMLInputElement)) e.preventDefault()
+  }
 
   return (
     <div ref={ref} className={`relative ${className}`}>
       <button
+        ref={buttonRef}
         type="button"
-        role="combobox"
-        aria-expanded={open}
         aria-haspopup="listbox"
-        aria-controls={`${id}-list`}
-        aria-activedescendant={open ? `${id}-${active}` : undefined}
+        aria-expanded={open}
+        aria-label={ariaLabel}
         onClick={(e) => {
           e.preventDefault()
           if (open) setOpen(false)
           else show()
         }}
-        onKeyDown={onKeyDown}
+        onKeyDown={onButtonKeyDown}
         className="flex w-full items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-left text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none"
       >
         {selected?.color && <AccountDot color={selected.color} />}
@@ -106,36 +133,96 @@ export function ColorSelect<V>({
         </span>
       </button>
       {open && (
-        <ul
-          id={`${id}-list`}
-          role="listbox"
+        <div
           onMouseDown={stop}
-          className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-md bg-white py-1 text-sm shadow-lg ring-1 ring-slate-200"
+          className="absolute z-50 mt-1 w-full min-w-56 overflow-hidden rounded-md bg-white text-sm shadow-lg ring-1 ring-slate-200"
         >
-          {options.map((o, i) => (
-            <li
-              key={String(o.value)}
-              id={`${id}-${i}`}
-              role="option"
-              aria-selected={i === selectedIndex}
-              onMouseEnter={() => setActive(i)}
-              onClick={(e) => {
-                e.preventDefault()
-                choose(i)
+          <div className="border-b border-slate-100 p-1.5">
+            <input
+              autoFocus
+              role="combobox"
+              aria-expanded
+              aria-controls={`${id}-list`}
+              aria-activedescendant={visible.length > 0 ? `${id}-${active}` : undefined}
+              aria-autocomplete="list"
+              className="w-full rounded px-2 py-1 text-sm outline-none placeholder:text-slate-400 focus:bg-slate-50"
+              placeholder="Buscar…"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setActive(0)
               }}
-              className={`flex cursor-default items-center gap-2 px-3 py-1.5 ${i === active ? 'bg-indigo-50' : ''} ${
-                i === selectedIndex ? 'font-medium' : ''
-              }`}
-            >
-              {o.color ? <AccountDot color={o.color} /> : <span className="size-2.5 shrink-0" />}
-              <span className="flex-1 truncate">{o.label}</span>
-              {o.detail && <span className="text-xs text-slate-500 tabular-nums">{o.detail}</span>}
-            </li>
-          ))}
-        </ul>
+              onKeyDown={onSearchKeyDown}
+            />
+          </div>
+          <ul id={`${id}-list`} role="listbox" className="max-h-64 overflow-auto py-1">
+            {visible.length === 0 && <li className="px-3 py-1.5 text-slate-400">Sin resultados</li>}
+            {visible.map((o, i) => (
+              <OptionRow
+                key={String(o.value)}
+                option={o}
+                id={`${id}-${i}`}
+                heading={o.group && o.group !== visible[i - 1]?.group ? o.group : null}
+                active={i === active}
+                selected={o.value === value}
+                onHover={() => setActive(i)}
+                onChoose={() => choose(o)}
+              />
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   )
+}
+
+function OptionRow<V>({
+  option,
+  id,
+  heading,
+  active,
+  selected,
+  onHover,
+  onChoose
+}: {
+  option: SelectOption<V>
+  id: string
+  heading: string | null
+  active: boolean
+  selected: boolean
+  onHover: () => void
+  onChoose: () => void
+}) {
+  return (
+    <>
+      {heading && (
+        <li role="presentation" className="px-3 pt-2 pb-0.5 text-xs font-medium tracking-wide text-slate-400 uppercase">
+          {heading}
+        </li>
+      )}
+      <li
+        id={id}
+        role="option"
+        aria-selected={selected}
+        onMouseEnter={onHover}
+        onClick={(e) => {
+          e.preventDefault()
+          onChoose()
+        }}
+        className={`flex cursor-default items-center gap-2 px-3 py-1.5 ${active ? 'bg-indigo-50' : ''} ${selected ? 'font-medium' : ''}`}
+      >
+        {option.color ? <AccountDot color={option.color} /> : <span className="size-2.5 shrink-0" />}
+        <span className="flex-1 truncate">{option.label}</span>
+        {option.detail && <span className="text-xs text-slate-500 tabular-nums">{option.detail}</span>}
+      </li>
+    </>
+  )
+}
+
+const ACCOUNT_TYPE_WORDS: Record<AccountType, string> = {
+  debit: 'débito',
+  cash: 'efectivo',
+  credit: 'tarjeta crédito'
 }
 
 /** Detalle que acompaña a una cuenta en las listas: el saldo, o la deuda si es tarjeta. */
@@ -143,6 +230,23 @@ export function accountDetail(a: AccountWithBalance): string {
   return a.type === 'credit' ? `deuda ${formatMoney(Math.max(0, -a.balance))}` : formatMoney(a.balance)
 }
 
-export function accountOptions(accounts: AccountWithBalance[]): ColorOption<number>[] {
-  return accounts.map((a) => ({ value: a.id, label: a.name, color: a.color, detail: accountDetail(a) }))
+export function accountOptions(accounts: AccountWithBalance[]): SelectOption<number>[] {
+  return accounts.map((a) => ({
+    value: a.id,
+    label: a.name,
+    color: a.color,
+    detail: accountDetail(a),
+    keywords: ACCOUNT_TYPE_WORDS[a.type]
+  }))
+}
+
+/** Categorías agrupadas, con "Sin categoría" al inicio. */
+export function categoryOptions(categories: Category[]): SelectOption<number | null>[] {
+  const sorted = [...categories].sort(
+    (a, b) => a.groupName.localeCompare(b.groupName, 'es') || a.name.localeCompare(b.name, 'es')
+  )
+  return [
+    { value: null, label: 'Sin categoría' },
+    ...sorted.map((c) => ({ value: c.id, label: c.name, group: c.groupName }))
+  ]
 }

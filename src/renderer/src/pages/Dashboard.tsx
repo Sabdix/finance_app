@@ -1,7 +1,7 @@
 import { currentMonth, formatDate, today } from '@shared/dates'
 import { formatMoney } from '@shared/money'
 import type { Navigate } from '../App'
-import { AccountDot } from '../components/ColorSelect'
+import { AccountDot } from '../components/SearchSelect'
 import { Badge, Button, Card, Empty, Money, PageHeader, Stat } from '../components/ui'
 import { useApi } from '../lib/data'
 

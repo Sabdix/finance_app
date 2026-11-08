@@ -10,6 +10,7 @@ import type {
   CategoryInput,
   Installment,
   InstallmentPlan,
+  SplitPart,
   Transaction,
   TransactionInput
 } from '@shared/types'
@@ -55,7 +56,64 @@ function validateTransaction(input: TransactionInput): void {
   }
   check(isIsoDate(input.date), 'Fecha inválida')
   check(isPositiveCents(input.amount), 'El monto debe ser mayor a cero')
-  check(Number.isInteger(input.accountId), 'Elige una cuenta')
+  if (input.splits === undefined) check(Number.isInteger(input.accountId), 'Elige una cuenta')
+  else validateSplits(input)
+}
+
+function validateExpenseCategory(categoryId: number | null): void {
+  if (categoryId === null) return
+  const c = getDb().prepare('SELECT kind FROM categories WHERE id = ?').get(categoryId) as Row | undefined
+  check(c, 'Una de las categorías no existe')
+  check(c.kind === 'expense', 'Cada parte del gasto dividido necesita una categoría de gasto')
+}
+
+function validateSplits(input: TransactionInput): void {
+  const splits = input.splits
+  check(Array.isArray(splits), 'División inválida')
+  check(input.kind === 'expense', 'Solo los gastos se pueden dividir entre cuentas')
+  check(splits.length >= 2, 'Un gasto dividido necesita al menos dos partes')
+  check(
+    splits.every(
+      (p) =>
+        Number.isInteger(p?.accountId) &&
+        (p.categoryId === null || Number.isInteger(p.categoryId)) &&
+        isPositiveCents(p.amount)
+    ),
+    'Cada parte del gasto dividido necesita un monto mayor a cero'
+  )
+  check(
+    new Set(splits.map((p) => `${p.accountId}:${p.categoryId}`)).size === splits.length,
+    'No repitas la misma cuenta con la misma categoría en el gasto dividido'
+  )
+  check(
+    new Set(splits.map((p) => p.accountId)).size > 1 || new Set(splits.map((p) => p.categoryId)).size > 1,
+    'Para dividir, usa al menos dos cuentas o dos categorías distintas'
+  )
+  splits.forEach((p) => validateExpenseCategory(p.categoryId))
+  const sum = splits.reduce((acc, p) => acc + p.amount, 0)
+  check(sum === input.amount, 'Las partes deben sumar el monto total')
+  const accountIds = [...new Set(splits.map((p) => p.accountId))]
+  const found = getDb()
+    .prepare('SELECT COUNT(*) AS n FROM accounts WHERE id IN (SELECT value FROM json_each(?))')
+    .get(JSON.stringify(accountIds)) as Row
+  check(found.n === accountIds.length, 'Una de las cuentas no existe')
+}
+
+/** Inserta un gasto o ingreso; si trae `splits`, un movimiento por parte, ligados por un split. Devuelve el id del primero. */
+function insertTransaction(db: Database.Database, input: TransactionInput, notes: string): number {
+  const insert = db.prepare(
+    'INSERT INTO transactions (date, account_id, amount, category_id, description, notes, split_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  )
+  const description = input.description.trim()
+  if (input.splits === undefined) {
+    const signed = input.kind === 'expense' ? -input.amount : input.amount
+    return Number(insert.run(input.date, input.accountId, signed, input.categoryId, description, notes, null).lastInsertRowid)
+  }
+  const splitId = Number(db.prepare('INSERT INTO splits DEFAULT VALUES').run().lastInsertRowid)
+  const ids = input.splits.map((p) =>
+    Number(insert.run(input.date, p.accountId, -p.amount, p.categoryId, description, notes, splitId).lastInsertRowid)
+  )
+  return ids[0]
 }
 
 const toAccount = (r: Row): AccountWithBalance => ({
@@ -97,7 +155,7 @@ function syncCardCategory(db: Database.Database, accountId: number): void {
   }
 }
 
-const toTransaction = (r: Row): Transaction => ({
+const toTransaction = (r: Row, splitParts: Map<number, SplitPart[]>): Transaction => ({
   id: r.id as number,
   date: r.date as string,
   accountId: r.account_id as number,
@@ -110,7 +168,9 @@ const toTransaction = (r: Row): Transaction => ({
   notes: r.notes as string,
   transferId: r.transfer_id as number | null,
   counterpartAccountName: r.counterpart_account_name as string | null,
-  installmentPlanId: r.installment_plan_id as number | null
+  installmentPlanId: r.installment_plan_id as number | null,
+  splitId: r.split_id as number | null,
+  splitParts: r.split_id ? (splitParts.get(r.split_id as number) ?? null) : null
 })
 
 const toInstallment = (r: Row): Installment => ({
@@ -234,7 +294,8 @@ export const api: Api = {
   // ---------- Movimientos ----------
   listTransactions(filter) {
     const where = filter.accountId ? 'WHERE t.account_id = @accountId' : ''
-    const rows = getDb()
+    const db = getDb()
+    const rows = db
       .prepare(
         `SELECT t.*, a.name AS account_name, a.color AS account_color, c.name AS category_name,
            (SELECT a2.name FROM transactions t2 JOIN accounts a2 ON a2.id = t2.account_id
@@ -247,27 +308,50 @@ export const api: Api = {
          LIMIT @limit`
       )
       .all({ accountId: filter.accountId ?? null, limit: filter.limit ?? 500 }) as Row[]
-    return rows.map(toTransaction)
+
+    // Las partes de cada gasto dividido, aunque estén en cuentas fuera del filtro.
+    const splitIds = [...new Set(rows.map((r) => r.split_id).filter((id) => id !== null))]
+    const splitParts = new Map<number, SplitPart[]>()
+    if (splitIds.length > 0) {
+      const parts = db
+        .prepare(
+          `SELECT split_id, account_id, category_id, amount FROM transactions
+           WHERE split_id IN (SELECT value FROM json_each(?)) ORDER BY id`
+        )
+        .all(JSON.stringify(splitIds)) as Row[]
+      for (const p of parts) {
+        const list = splitParts.get(p.split_id as number) ?? []
+        list.push({ accountId: p.account_id as number, categoryId: p.category_id as number | null, amount: -(p.amount as number) })
+        splitParts.set(p.split_id as number, list)
+      }
+    }
+    return rows.map((r) => toTransaction(r, splitParts))
   },
 
   createTransaction(input) {
     validateTransaction(input)
-    const signed = input.kind === 'expense' ? -input.amount : input.amount
-    const r = getDb()
-      .prepare('INSERT INTO transactions (date, account_id, amount, category_id, description, notes) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(input.date, input.accountId, signed, input.categoryId, input.description.trim(), cleanNotes(input.notes) ?? '')
-    return Number(r.lastInsertRowid)
+    const db = getDb()
+    return db.transaction(() => insertTransaction(db, input, cleanNotes(input.notes) ?? ''))()
   },
 
   updateTransaction(id, input) {
     validateTransaction(input)
     const db = getDb()
-    const existing = db.prepare('SELECT transfer_id, installment_plan_id FROM transactions WHERE id = ?').get(id) as
-      | Row
-      | undefined
+    const existing = db
+      .prepare('SELECT transfer_id, installment_plan_id, split_id, notes FROM transactions WHERE id = ?')
+      .get(id) as Row | undefined
     check(existing, 'El movimiento no existe')
     check(!existing.transfer_id, 'Las transferencias no se editan; elimínala y regístrala de nuevo')
     check(!existing.installment_plan_id, 'Las compras a meses se administran desde la sección MSI')
+    if (existing.split_id || input.splits !== undefined) {
+      // Un gasto dividido se edita como grupo: se reemplazan todas sus partes.
+      db.transaction(() => {
+        if (existing.split_id) db.prepare('DELETE FROM splits WHERE id = ?').run(existing.split_id)
+        else db.prepare('DELETE FROM transactions WHERE id = ?').run(id)
+        insertTransaction(db, input, cleanNotes(input.notes) ?? (existing.notes as string))
+      })()
+      return
+    }
     const signed = input.kind === 'expense' ? -input.amount : input.amount
     db.prepare(
       `UPDATE transactions SET date = ?, account_id = ?, amount = ?, category_id = ?, description = ?, notes = COALESCE(?, notes)
@@ -298,12 +382,13 @@ export const api: Api = {
 
   deleteTransaction(id) {
     const db = getDb()
-    const t = db.prepare('SELECT transfer_id, installment_plan_id FROM transactions WHERE id = ?').get(id) as
+    const t = db.prepare('SELECT transfer_id, installment_plan_id, split_id FROM transactions WHERE id = ?').get(id) as
       | Row
       | undefined
     if (!t) return
     check(!t.installment_plan_id, 'Esta es una compra a meses; elimínala desde la sección MSI')
     if (t.transfer_id) db.prepare('DELETE FROM transfers WHERE id = ?').run(t.transfer_id)
+    else if (t.split_id) db.prepare('DELETE FROM splits WHERE id = ?').run(t.split_id)
     else db.prepare('DELETE FROM transactions WHERE id = ?').run(id)
   },
 
@@ -311,10 +396,11 @@ export const api: Api = {
     check(typeof notes === 'string', 'Observaciones inválidas')
     validateNotes(notes)
     const db = getDb()
-    const t = db.prepare('SELECT transfer_id FROM transactions WHERE id = ?').get(id) as Row | undefined
+    const t = db.prepare('SELECT transfer_id, split_id FROM transactions WHERE id = ?').get(id) as Row | undefined
     check(t, 'El movimiento no existe')
-    // En una transferencia, ambos lados comparten las observaciones.
+    // En una transferencia, ambos lados comparten las observaciones; en un gasto dividido, todas sus partes.
     if (t.transfer_id) db.prepare('UPDATE transactions SET notes = ? WHERE transfer_id = ?').run(cleanNotes(notes), t.transfer_id)
+    else if (t.split_id) db.prepare('UPDATE transactions SET notes = ? WHERE split_id = ?').run(cleanNotes(notes), t.split_id)
     else db.prepare('UPDATE transactions SET notes = ? WHERE id = ?').run(cleanNotes(notes), id)
   },
 

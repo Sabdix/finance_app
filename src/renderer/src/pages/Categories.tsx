@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { Category, CategoryInput } from '@shared/types'
+import { SearchSelect } from '../components/SearchSelect'
 import { Badge, Button, Card, Field, FormActions, inputClass, Modal, PageHeader } from '../components/ui'
 import { useApi, useMutate } from '../lib/data'
 
@@ -84,10 +85,14 @@ function CategoryForm({ category, groups, onDone }: { category: Category | null;
         </datalist>
       </Field>
       <Field label="Tipo">
-        <select className={inputClass} value={kind} onChange={(e) => setKind(e.target.value as CategoryInput['kind'])}>
-          <option value="expense">Gasto</option>
-          <option value="income">Ingreso</option>
-        </select>
+        <SearchSelect<CategoryInput['kind']>
+          value={kind}
+          onChange={setKind}
+          options={[
+            { value: 'expense', label: 'Gasto' },
+            { value: 'income', label: 'Ingreso' }
+          ]}
+        />
       </Field>
       <FormActions onCancel={onDone} />
     </form>

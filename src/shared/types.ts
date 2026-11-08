@@ -64,6 +64,17 @@ export interface Transaction {
   /** Cuenta del otro lado de una transferencia. */
   counterpartAccountName: string | null
   installmentPlanId: number | null
+  /** Gasto dividido entre cuentas o categorías: cada parte es un movimiento con el mismo `splitId`. */
+  splitId: number | null
+  /** Todas las partes del gasto dividido (incluida esta), en orden de captura. */
+  splitParts: SplitPart[] | null
+}
+
+/** Una parte de un gasto dividido: cuánto (positivo, en centavos) sale de qué cuenta y a qué categoría va. */
+export interface SplitPart {
+  accountId: number
+  categoryId: number | null
+  amount: number
 }
 
 export interface TransactionInput {
@@ -75,6 +86,11 @@ export interface TransactionInput {
   categoryId: number | null
   description: string
   notes?: string
+  /**
+   * Solo en gastos: reparte el gasto en dos o más partes, cada una con su cuenta y su categoría
+   * (sin repetir la misma combinación). Las partes deben sumar `amount`; `accountId` y `categoryId` se ignoran.
+   */
+  splits?: SplitPart[]
 }
 
 export interface TransferInput {
