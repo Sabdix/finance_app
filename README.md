@@ -23,6 +23,9 @@ el script de instalación, apruébalo con `npm install-scripts approve better-sq
 - Respaldos automáticos: carpeta `backups/` junto a la base, o la que elijas en **Respaldo y exportación**.
   Se crea uno al abrir la app (si no hay del día) y se sobrescribe al cerrarla; se conservan 30 días.
   Al restaurar, antes se guarda `finanzas-antes-de-restaurar-*.db`, que nunca se borra sola.
+- Al abrir una versión nueva que trae migraciones, antes de aplicarlas se guarda
+  `finanzas-antes-de-migrar-v<versión>-<fecha>.db` con la base tal como estaba. Tampoco se borra sola;
+  restáuralo si necesitas volver a la versión anterior de la app.
 - Exportación a CSV (movimientos, cuentas, calendario MSI): UTF-8 con BOM para Excel, montos con punto
   decimal y dos decimales; textos que empiezan con `=`, `+`, `-` o `@` se neutralizan para que Excel no
   los ejecute como fórmula.

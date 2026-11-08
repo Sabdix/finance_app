@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { API_METHODS } from '@shared/api'
 import { api } from './api'
-import { autoBackup } from './data'
+import { autoBackup, backupBeforeMigrations } from './data'
 import { closeDb, getDb } from './db/connection'
 
 function registerIpc(): void {
@@ -37,6 +37,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // Primero el respaldo, con la base tal como la dejó la versión anterior; después las migraciones.
+  backupBeforeMigrations()
   getDb()
   autoBackup({ overwrite: false })
   registerIpc()

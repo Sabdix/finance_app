@@ -8,8 +8,9 @@ const dir = mkdtempSync(join(tmpdir(), 'finanzas-data-'))
 vi.mock('electron', () => ({ app: { getPath: () => dir }, BrowserWindow: {}, dialog: {}, shell: {} }))
 
 const { api } = await import('./api')
-const { closeDb } = await import('./db/connection')
-const { buildCsv, listBackups, pruneBackups, restoreFrom, validateBackupFile, writeBackup, backupFolder } = await import('./data')
+const { closeDb, dbPath, getDb } = await import('./db/connection')
+const { migrate, MIGRATION_COUNT } = await import('./db/migrations')
+const { backupBeforeMigrations, buildCsv, listBackups, pruneBackups, restoreFrom, validateBackupFile, writeBackup, backupFolder } = await import('./data')
 
 afterAll(() => {
   closeDb()
@@ -111,5 +112,31 @@ describe('respaldos', () => {
     restoreFrom(backup)
     expect(api.listAccounts().map((a) => a.name).sort()).toEqual(['Nómina', 'Visa, Oro'])
     expect(listBackups(backupFolder()).some((b) => b.name.startsWith('finanzas-antes-de-restaurar-'))).toBe(true)
+  })
+
+  it('al actualizar, respalda la base de la versión anterior antes de migrarla', () => {
+    // Simula una base que dejó la versión anterior de la app (le falta la última migración).
+    closeDb()
+    for (const f of [dbPath(), `${dbPath()}-wal`, `${dbPath()}-shm`]) rmSync(f, { force: true })
+    const old = new Database(dbPath())
+    migrate(old, MIGRATION_COUNT - 1)
+    old.prepare(`INSERT INTO accounts (name, type) VALUES ('Vieja', 'debit')`).run()
+    old.close()
+
+    const backup = backupBeforeMigrations()!
+    expect(backup).toMatch(new RegExp(`finanzas-antes-de-migrar-v${MIGRATION_COUNT - 1}-\\d{4}-\\d{2}-\\d{2}\\.db$`))
+    const copy = new Database(backup, { readonly: true })
+    expect(copy.pragma('user_version', { simple: true })).toBe(MIGRATION_COUNT - 1)
+    expect(copy.prepare('SELECT name FROM accounts').all()).toEqual([{ name: 'Vieja' }])
+    copy.close()
+
+    // Ya respaldada, la base se migra con normalidad y no se vuelve a respaldar.
+    expect(getDb().pragma('user_version', { simple: true })).toBe(MIGRATION_COUNT)
+    expect(api.listAccounts().map((a) => a.name)).toEqual(['Vieja'])
+    expect(backupBeforeMigrations()).toBeNull()
+
+    // La rotación de respaldos diarios no lo borra.
+    pruneBackups(backupFolder(), 0)
+    expect(existsSync(backup)).toBe(true)
   })
 })

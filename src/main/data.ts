@@ -19,7 +19,8 @@ export const BACKUPS_TO_KEEP = 30
 // ---------- Ajustes ----------
 
 function getSetting(key: string): string | null {
-  const r = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(key) as Row | undefined
+  // Sin migrar, para poder leer la carpeta de respaldos antes de aplicar migraciones.
+  const r = getDb({ migrate: false }).prepare('SELECT value FROM settings WHERE key = ?').get(key) as Row | undefined
   return (r?.value as string) ?? null
 }
 
@@ -31,7 +32,12 @@ function setSetting(key: string, value: string | null): void {
 const defaultBackupFolder = (): string => join(app.getPath('userData'), 'backups')
 
 export function backupFolder(): string {
-  return getSetting('backupFolder') ?? defaultBackupFolder()
+  try {
+    return getSetting('backupFolder') ?? defaultBackupFolder()
+  } catch {
+    // Bases muy viejas aún no tienen la tabla de ajustes.
+    return defaultBackupFolder()
+  }
 }
 
 // ---------- Respaldos ----------
@@ -41,7 +47,7 @@ export function writeBackup(folder = backupFolder(), name = `finanzas-${today()}
   mkdirSync(folder, { recursive: true })
   const target = join(folder, name)
   const tmp = `${target}.tmp`
-  writeFileSync(tmp, getDb().serialize())
+  writeFileSync(tmp, getDb({ migrate: false }).serialize())
   renameSync(tmp, target)
   pruneBackups(folder)
   return target
@@ -61,6 +67,23 @@ export function autoBackup({ overwrite }: { overwrite: boolean }): void {
   } catch (e) {
     // Un respaldo fallido (p. ej. la carpeta de la nube no está disponible) no debe impedir usar la app.
     console.error('No se pudo crear el respaldo automático:', e)
+  }
+}
+
+/**
+ * Si hay migraciones pendientes, guarda la base tal como está antes de migrarla. Este respaldo no entra en la
+ * rotación de 30 días ni se sobrescribe al cerrar, así que sirve para volver a la versión anterior de la app.
+ * Devuelve la ruta del respaldo, o null si no hacía falta.
+ */
+export function backupBeforeMigrations(): string | null {
+  try {
+    const version = getDb({ migrate: false }).pragma('user_version', { simple: true }) as number
+    // Una base nueva (versión 0) no tiene nada que respaldar.
+    if (version === 0 || version >= MIGRATION_COUNT) return null
+    return writeBackup(backupFolder(), `finanzas-antes-de-migrar-v${version}-${today()}.db`)
+  } catch (e) {
+    console.error('No se pudo respaldar antes de migrar:', e)
+    return null
   }
 }
 
